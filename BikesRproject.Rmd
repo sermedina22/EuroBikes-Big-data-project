@@ -1,0 +1,248 @@
+---
+title: "Bikes bigdata proyect"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Biking project case of study#
+
+## 1.Company goal
+
+Ultimate goal is to Desing marketing strategies aimed at converting casual riders into annual members.
+
+## 2.Bussiness task
+
+The question we are trying to solve is How annual members and casual members differ, how they use bikes differently? we can analyze the cyclistic histocial bike trip data to identify trends or patterns that way we can help stake holders to resolve this question.
+
+## 3.Prepare
+
+Where is the data located? we got multiple .csv files are going to explore how data is organized for that we will load the first file after loading the require packages
+
+```{r packagesinstallation}
+#install.packages("tidyverse")
+library(tidyverse)
+library(conflicted)
+conflict_prefer("filter","dplyr")
+conflict_prefer("lag","dplyr")
+library(ggplot2)
+library(dplyr)
+library(readr)
+
+```
+
+Over here we load the .csv last quarter 3 months and see how data is organized with the following code
+
+```{r exploringdata}
+#load CSV here collect the data
+bikes_m1<-read.csv("202401-divvy-tripdata.csv")
+bikes_m2<-read.csv("202402-divvy-tripdata.csv")
+bikes_m3<-read.csv("202403-divvy-tripdata.csv")
+
+#head(bikes_m1)
+
+#here we preview the datasets
+str(bikes_m1)
+str(bikes_m2)
+str(bikes_m3)
+
+#glimpse(bikes_m1)
+
+
+
+```
+
+We see we are dealing with a very large dataset, we compare the names of the columns to see if they are all the same
+
+```{r}
+#comparing columns names here
+colnames(bikes_m1)
+colnames(bikes_m2)
+colnames(bikes_m3)
+
+```
+
+## 4.Data process
+
+All columns names are the same so we proceed to stacks each data frame into a big data frame
+
+```{r}
+all_trips<- bind_rows(bikes_m1,bikes_m2,bikes_m3) #bigger dataset Qx
+#we preview the dataset
+str(all_trips)
+```
+
+we then need to remove unnecessary data columns data like the latitude info
+
+```{r}
+#here we remove unnecessary columns
+all_trips<- all_trips %>%
+  select(-c(start_lat,start_lng,end_lat,end_lng))
+colnames(all_trips)
+dim(all_trips) # dimensions of the data frame
+summary(all_trips) #statistical summary
+```
+
+over here we analyze the data to clean it and add new interesting info
+
+```{r}
+
+unique(all_trips$member_casual) #run this to check is there are some data errors
+table(all_trips$member_casual) # we run this to check how much members are and how much casuals
+#we add columns to know the date month day year and day of the week
+all_trips$date<- as.Date(all_trips$started_at)
+all_trips$month<- format(as.Date(all_trips$date),"%m")
+all_trips$day<- format(as.Date(all_trips$date),"%d")
+all_trips$year<- format(as.Date(all_trips$date),"%Y")
+all_trips$day_of_week<- format(as.Date(all_trips$date),"%A")
+#then we add the ride_length calculation to all trips in seconds
+all_trips$ride_length<-difftime(all_trips$ended_at,all_trips$started_at)
+# then we Inspect the structure of the columns
+str(all_trips)
+```
+
+After this we make some finals adjustments to the data
+
+```{r}
+# we Convert "ride_length" from Factor to numeric so we can run calculations on the data
+is.factor(all_trips$ride_length)
+all_trips$ride_length <- as.numeric(as.character(all_trips$ride_length))
+is.numeric(all_trips$ride_length)
+#here we remove bad data negative values, created a new version because data is being removed
+all_trips_v2 <- all_trips[!(all_trips$start_station_name == "HQ QR" | all_trips$ride_length<0),]
+#here we drop any null values in the colum members_casual
+all_trips_v2 %>% drop_na(member_casual)
+```
+
+## 5.Data Analysis
+
+Then we can starts doing some statistics of the data
+
+```{r}
+summary(all_trips_v2$ride_length)
+#here we compare members and casual users
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = mean)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = median)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = max)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = min)
+#here we see the average ride time by each day for members vs casual users
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week,
+FUN = mean)
+
+```
+
+we notice that the days of the week are out of orders we fix that
+
+```{r}
+# Notice that the days of the week are out of order. Let's fix that.
+all_trips_v2$day_of_week <- ordered(all_trips_v2$day_of_week, levels=c("Sunday", "Monday",
+"Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+# Now, let's run the average ride time by each day for members vs casual users
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week,
+FUN = mean)
+```
+
+Now we can analyze average ride time by each day for members vs casual users
+
+```{r}
+# analyze ridership data by type and weekday
+all_trips_v2 %>%
+mutate(weekday = wday(started_at, label = TRUE)) %>% #creates weekday field using wday()
+group_by(member_casual, weekday ) %>%  #groups by usertype and weekday
+summarise(number_of_rides = n() #calculates the number of rides and average duration 
+        ,average_duration = mean(ride_length)) %>% # calculates the average duration
+arrange(member_casual, weekday) # sorts
+```
+
+Finally we can also get the number of rides and average duration per month
+
+```{r}
+all_trips_v2 %>%
+group_by(member_casual, month, rideable_type) %>%  #groups by usertype and month
+summarise(number_of_rides = n() #calculates the number of rides and average duration 
+        ,average_duration = mean(ride_length)) %>% # calculates the average duration
+arrange(member_casual, month) # sorts
+```
+
+## 5.Share data with visualization
+
+Now we can start doing some plots
+
+```{r}
+# Let's visualize the number of rides by rider type
+all_trips_v2 %>%
+mutate(weekday = wday(started_at, label = TRUE)) %>%
+group_by(member_casual, weekday) %>%
+  summarise(number_of_rides = n()
+,average_duration = mean(ride_length)) %>%
+arrange(member_casual, weekday) %>%
+ggplot(aes(x = weekday, y = number_of_rides, fill = member_casual)) +
+geom_col(position = "dodge")
+```
+
+Finally we get the average duration
+
+```{r}
+# Let's create a visualization for average duration
+all_trips_v2 %>%
+mutate(weekday = wday(started_at, label = TRUE)) %>%
+group_by(member_casual, weekday) %>%
+summarise(number_of_rides = n()
+,average_duration = mean(ride_length)) %>%
+arrange(member_casual, weekday) %>%
+ggplot(aes(x = weekday, y = average_duration, fill = member_casual)) +
+geom_col(position = "dodge")
+```
+
+we group by month to see if there is any different pattern in the same variables for the numbers of rides
+
+```{r}
+all_trips_v2 %>%
+group_by(member_casual, month) %>%
+  summarise(number_of_rides = n()
+,average_duration = mean(ride_length)) %>%
+arrange(member_casual, month) %>%
+ggplot(aes(x = month, y = number_of_rides, fill = member_casual)) +
+geom_col(position = "dodge")
+```
+
+for the average duration
+
+```{r}
+# 
+all_trips_v2 %>%
+group_by(member_casual, month) %>%
+summarise(number_of_rides = n()
+,average_duration = mean(ride_length)) %>%
+arrange(member_casual, month) %>%
+ggplot(aes(x = month, y = average_duration, fill = member_casual)) +
+geom_col(position = "dodge")
+```
+
+Finally we check if the casual members use more electrical bikes or classicals we see here if casual riders use more the electric bikes or the classic bikes compared to the members
+
+```{r}
+
+all_trips_v2 %>%
+group_by(member_casual, month, rideable_type) %>%
+  summarise(number_of_rides = n()
+,average_duration = mean(ride_length)) %>%
+arrange(member_casual, month, rideable_type) %>%
+ggplot(aes(x = rideable_type, y = number_of_rides, fill = member_casual)) +
+geom_col(position = "dodge")
+
+all_trips_v2 %>%
+group_by(member_casual, month, rideable_type) %>%
+summarise(number_of_rides = n()
+,average_duration = mean(ride_length)) %>%
+arrange(member_casual, month, rideable_type) %>%
+ggplot(aes(x = rideable_type, y = average_duration, fill = member_casual)) +
+geom_col(position = "dodge")
+
+```
+
+## 6.Conclusion
+
+We can clearly see that the casual users have an clear higher average than the members so is clear that they use the bikes more but less frequently being Sunday and Saturday the days that they use it more. So we can use this information to make a new deal for the casual users in a way that is more beneficial for them a subscription to the service if they see that is a money saver. Analyzing the months data we see that when we are closing to end of the year around december the use of the bikes and average duration get decreased probably to the winter and holidays season and at the beginning of the years gradually start increasing.
